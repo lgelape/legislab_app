@@ -194,14 +194,30 @@ com_logotipo <- function(p, esc = 1) {
   g
 }
 
-#' O renderPlot() do Shiny desenha o resultado com print(), e o print.gtable
-#' apenas descreve o objeto em texto -- dai o metodo proprio. O ggsave() usa
-#' grid.draw() e ja funcionaria sem ele.
-print.figura_legislab <- function(x, ...) {
+#' Desenha a figura no dispositivo grafico corrente.
+#'
+#' O gtable NAO pode ser apenas devolvido ao renderPlot(): o Shiny imprime o
+#' valor do bloco a partir do seu proprio namespace, e o despacho de metodos S3
+#' procura print.figura_legislab na cadeia namespace(shiny) -> base -> global ->
+#' search(). Como o app.R e avaliado num ambiente PROPRIO (filho do global), o
+#' metodo definido aqui fica invisivel para esse despacho; sobra o print.grob do
+#' grid, que apenas descreve o objeto em texto -- e o painel sai em branco.
+#' (Numa sessao local em que app.R ja tenha sido lido no console o metodo esta
+#' no ambiente global e tudo funciona; num processo novo, como o do Posit
+#' Cloud/Connect, nao.) Por isso o desenho e feito explicitamente.
+desenhar <- function(x) {
   grid::grid.newpage()
   grid::grid.draw(x)
+  invisible(NULL)
+}
+
+# Para quem imprimir o objeto no console. registerS3method() poe o metodo na
+# tabela S3 da base, onde o despacho enxerga a partir de qualquer ambiente.
+print.figura_legislab <- function(x, ...) {
+  desenhar(x)
   invisible(x)
 }
+registerS3method("print", "figura_legislab", print.figura_legislab)
 
 # --- Construcao do grafico -------------------------------------------------
 matriz_plot <- function(dados,
@@ -662,7 +678,7 @@ server <- function(input, output, session) {
   }
 
   output$matriz <- renderPlot({
-    grafico()
+    desenhar(grafico())
   }, res = 96)
 
   output$tabela <- renderDT({
