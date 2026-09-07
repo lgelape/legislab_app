@@ -119,10 +119,13 @@ PAD_SUP <- 1.60
 # Deslocamento vertical do rotulo em relacao ao ponto do ator.
 OFFSET_ROTULO <- 0.55
 
-# Altura do logotipo na faixa de assinatura da figura (fora da area do
-# grafico), e o respiro entre ele e as bordas dessa faixa.
-TAM_LOGO_CM <- 1.5
-FOLGA_LOGO_MM <- 3
+# O logotipo mora na linha do titulo e e dimensionado por ela: sua altura e um
+# multiplo da altura do titulo, para que marca e texto se equilibrem sem que a
+# linha precise crescer muito. TAM_LOGO_CM so entra quando nao ha titulo.
+TAM_TITULO_PT   <- 16
+FATOR_LOGO      <- 1.5     # altura do logotipo / altura da linha do titulo
+TAM_LOGO_CM     <- 0.9     # altura minima, usada quando o titulo esta vazio
+FOLGA_LOGO_MM   <- 3
 
 #' Converte a posicao relativa dentro do quadrante (0-100) em coordenadas
 #' do grafico (0-10 em cada eixo). Vetorizada.
@@ -142,35 +145,49 @@ VAZIO <- data.frame(
 
 # --- Assinatura da figura ---------------------------------------------------
 #' Acrescenta o logotipo do LegisLab FORA da area do grafico, no canto
-#' inferior direito da figura. Em vez de sobrepor a marca ao painel, abre uma
-#' faixa propria abaixo de tudo (inclusive da fonte), de modo que o logotipo
-#' nunca dispute espaco com quadrantes, pontos ou rotulos.
+#' superior direito da figura, na mesma faixa do titulo. Em vez de sobrepor a
+#' marca ao painel, ela ocupa a linha do titulo (esticada, se preciso, para
+#' caber), de modo que nunca dispute espaco com quadrantes, pontos ou rotulos.
 #' Devolve um gtable -- o Shiny (print) e o ggsave (grid.draw) desenham igual.
 com_logotipo <- function(p, esc = 1) {
   if (is.null(LOGO_RASTER)) return(p)
 
   prop  <- dim(LOGO_RASTER)[2] / dim(LOGO_RASTER)[1]   # largura / altura
-  alt   <- unit(TAM_LOGO_CM * esc, "cm")
   folga <- unit(FOLGA_LOGO_MM, "mm")
 
   g <- ggplotGrob(p)
-  g <- gtable::gtable_add_rows(g, alt + folga + folga, pos = -1)
-  linha <- nrow(g)
 
-  # Fundo proprio: o plot.background do ggplot nao alcanca a faixa nova.
-  g <- gtable::gtable_add_grob(
-    g, grid::rectGrob(gp = grid::gpar(fill = COR$plano, col = NA)),
-    t = linha, l = 1, r = ncol(g), z = -Inf, clip = "off", name = "fundo-logotipo"
+  linha <- g$layout$t[g$layout$name == "title"]
+  if (length(linha) == 0) return(p)
+
+  # A altura da marca deriva da propria linha do titulo -- assim ela acompanha
+  # TAM_TITULO_PT e a escala da exportacao sem nenhum ajuste manual. O minimo
+  # em cm cobre o caso de titulo vazio, quando a linha teria altura zero.
+  alt <- grid::unit.pmax(
+    g$heights[linha] * FATOR_LOGO,
+    unit(TAM_LOGO_CM * esc, "cm")
   )
+  g$heights[linha] <- alt
+
+  # Coluna propria a direita, em vez de sobrepor: assim um titulo longo para
+  # antes da marca em vez de correr por baixo dela. Como coord_fixed() ja deixa
+  # sobra lateral, a faixa quase nunca custa tamanho ao painel.
+  g <- gtable::gtable_add_cols(g, alt * prop + folga, pos = -1)
+  coluna <- ncol(g)
+
+  # O plot.background nasceu sem essa coluna; estica-lo evita uma faixa vazada.
+  fundo <- which(g$layout$name == "background")
+  if (length(fundo) == 1) g$layout$r[fundo] <- coluna
+
   g <- gtable::gtable_add_grob(
     g,
     grid::rasterGrob(
       LOGO_RASTER, interpolate = TRUE,
       width = alt * prop, height = alt,
-      x = unit(1, "npc") - folga, y = unit(0, "npc") + folga,
-      hjust = 1, vjust = 0
+      x = unit(1, "npc") - folga, y = unit(0.5, "npc"),
+      hjust = 1, vjust = 0.5
     ),
-    t = linha, l = 1, r = ncol(g), clip = "off", name = "logotipo"
+    t = linha, l = coluna, r = coluna, clip = "off", name = "logotipo"
   )
 
   class(g) <- c("figura_legislab", class(g))
@@ -295,12 +312,13 @@ matriz_plot <- function(dados,
       axis.text         = element_text(colour = COR$tinta3, size = 9 * esc),
       axis.ticks        = element_blank(),
       plot.title        = element_text(colour = COR$titulo, face = "bold",
-                                       size = 15 * esc, margin = margin(b = 3 * esc)),
+                                       size = TAM_TITULO_PT * esc,
+                                       margin = margin(b = 3 * esc)),
       plot.subtitle     = element_text(colour = COR$tinta2, size = 10.5 * esc,
                                        margin = margin(b = 7 * esc)),
       plot.caption      = element_text(colour = COR$tinta3, size = 8.5 * esc,
                                        hjust = 0, margin = margin(t = 6 * esc)),
-      plot.margin       = margin(6, 8, 4, 5)
+      plot.margin       = margin(10, 8, 4, 5)   # topo folgado: o logotipo mora la
     )
 
   com_logotipo(p, esc)
