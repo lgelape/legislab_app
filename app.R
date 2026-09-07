@@ -63,9 +63,9 @@ LOGO <- local({
   }
 })
 
-# Mesmo arquivo, agora como raster, para a marca no canto do grafico.
+# Mesmo arquivo, agora como raster, para a assinatura da figura exportada.
 # O JPG traz uma larga moldura branca; recorta-la faz o simbolo ocupar melhor
-# o espaco reservado, sem precisar aumentar a area do logotipo no painel.
+# a faixa reservada, sem precisar aumentar a area do logotipo.
 LOGO_RASTER <- local({
   candidatos <- c("www/Legislab.jpg", "Legislab.jpg")
   arq <- candidatos[file.exists(candidatos)]
@@ -119,9 +119,10 @@ PAD_SUP <- 1.60
 # Deslocamento vertical do rotulo em relacao ao ponto do ator.
 OFFSET_ROTULO <- 0.55
 
-# Lado do logotipo desenhado no canto inferior direito do painel. A faixa
-# abaixo de PAD_INF nunca recebe ponto nem rotulo, entao a marca cabe ali.
+# Altura do logotipo na faixa de assinatura da figura (fora da area do
+# grafico), e o respiro entre ele e as bordas dessa faixa.
 TAM_LOGO_CM <- 1.5
+FOLGA_LOGO_MM <- 3
 
 #' Converte a posicao relativa dentro do quadrante (0-100) em coordenadas
 #' do grafico (0-10 em cada eixo). Vetorizada.
@@ -138,6 +139,52 @@ VAZIO <- data.frame(
   estrategia = character(0), p_interesse = numeric(0), p_poder = numeric(0),
   stringsAsFactors = FALSE
 )
+
+# --- Assinatura da figura ---------------------------------------------------
+#' Acrescenta o logotipo do LegisLab FORA da area do grafico, no canto
+#' inferior direito da figura. Em vez de sobrepor a marca ao painel, abre uma
+#' faixa propria abaixo de tudo (inclusive da fonte), de modo que o logotipo
+#' nunca dispute espaco com quadrantes, pontos ou rotulos.
+#' Devolve um gtable -- o Shiny (print) e o ggsave (grid.draw) desenham igual.
+com_logotipo <- function(p, esc = 1) {
+  if (is.null(LOGO_RASTER)) return(p)
+
+  prop  <- dim(LOGO_RASTER)[2] / dim(LOGO_RASTER)[1]   # largura / altura
+  alt   <- unit(TAM_LOGO_CM * esc, "cm")
+  folga <- unit(FOLGA_LOGO_MM, "mm")
+
+  g <- ggplotGrob(p)
+  g <- gtable::gtable_add_rows(g, alt + folga + folga, pos = -1)
+  linha <- nrow(g)
+
+  # Fundo proprio: o plot.background do ggplot nao alcanca a faixa nova.
+  g <- gtable::gtable_add_grob(
+    g, grid::rectGrob(gp = grid::gpar(fill = COR$plano, col = NA)),
+    t = linha, l = 1, r = ncol(g), z = -Inf, clip = "off", name = "fundo-logotipo"
+  )
+  g <- gtable::gtable_add_grob(
+    g,
+    grid::rasterGrob(
+      LOGO_RASTER, interpolate = TRUE,
+      width = alt * prop, height = alt,
+      x = unit(1, "npc") - folga, y = unit(0, "npc") + folga,
+      hjust = 1, vjust = 0
+    ),
+    t = linha, l = 1, r = ncol(g), clip = "off", name = "logotipo"
+  )
+
+  class(g) <- c("figura_legislab", class(g))
+  g
+}
+
+#' O renderPlot() do Shiny desenha o resultado com print(), e o print.gtable
+#' apenas descreve o objeto em texto -- dai o metodo proprio. O ggsave() usa
+#' grid.draw() e ja funcionaria sem ele.
+print.figura_legislab <- function(x, ...) {
+  grid::grid.newpage()
+  grid::grid.draw(x)
+  invisible(x)
+}
 
 # --- Construcao do grafico -------------------------------------------------
 matriz_plot <- function(dados,
@@ -158,25 +205,6 @@ matriz_plot <- function(dados,
     # Linhas divisoras (recessivas)
     geom_hline(yintercept = 5, colour = COR$eixo, linewidth = 0.4) +
     geom_vline(xintercept = 5, colour = COR$eixo, linewidth = 0.4)
-
-  # Logotipo no canto inferior direito do painel. Posicionado em npc (cantos
-  # do painel) com tamanho absoluto em cm, entao independe da escala dos
-  # dados. Entra ANTES dos atores para que, num eventual encontro, o rotulo
-  # fique por cima -- o dado nunca perde para a marca.
-  if (!is.null(LOGO_RASTER)) {
-    prop <- dim(LOGO_RASTER)[2] / dim(LOGO_RASTER)[1]   # largura / altura
-    alt <- TAM_LOGO_CM * esc
-    p <- p + annotation_custom(
-      grid::rasterGrob(
-        LOGO_RASTER, interpolate = TRUE,
-        width = unit(alt * prop, "cm"), height = unit(alt, "cm"),
-        x = unit(1, "npc") - unit(2, "mm"),
-        y = unit(0, "npc") + unit(2, "mm"),
-        hjust = 1, vjust = 0
-      ),
-      xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf
-    )
-  }
 
   # Nome da estrategia de cada quadrante
   if (isTRUE(mostrar_estrategias)) {
@@ -236,7 +264,7 @@ matriz_plot <- function(dados,
     )
   }
 
-  p +
+  p <- p +
     scale_x_continuous(
       limits = c(0, 10), breaks = c(0, 5, 10),
       labels = c("Baixo", "Médio", "Alto"),
@@ -274,6 +302,8 @@ matriz_plot <- function(dados,
                                        hjust = 0, margin = margin(t = 6 * esc)),
       plot.margin       = margin(6, 8, 4, 5)
     )
+
+  com_logotipo(p, esc)
 }
 
 # --- Interface -------------------------------------------------------------
